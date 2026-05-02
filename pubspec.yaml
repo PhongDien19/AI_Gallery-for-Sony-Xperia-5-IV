@@ -15,6 +15,7 @@ dependencies:
   freezed_annotation: ^3.1.0
   get_it: ^9.2.1
   google_fonts: ^8.1.0
+  google_ml_kit: ^0.21.0
   hive: ^2.2.3
   hive_flutter: ^1.1.0
   image: ^4.8.0

@@ -32,9 +32,29 @@ class _AiAnalyzeScreenState extends ConsumerState<AiAnalyzeScreen> {
 
   Future<void> _loadImage() async {
     final file = await widget.asset.file;
-    setState(() {
-      _imageFile = file;
-    });
+    if (file != null) {
+      setState(() {
+        _imageFile = file;
+      });
+      // Automatic background scan when image is opened
+      _runBackgroundScan();
+    }
+  }
+
+  Future<void> _runBackgroundScan() async {
+    if (_imageFile == null) return;
+    
+    final aiService = ref.read(gemmaAiServiceProvider);
+    final bytes = await _imageFile!.readAsBytes();
+    
+    // Quick scan with ML Kit (The "Eyes")
+    final result = await aiService.analyzeImage(bytes, _imageFile!.path, widget.asset.createDateTime);
+
+    if (mounted) {
+      setState(() {
+        _analysisResult = result;
+      });
+    }
   }
 
   Future<void> _runMagicEraser() async {
@@ -74,7 +94,7 @@ class _AiAnalyzeScreenState extends ConsumerState<AiAnalyzeScreen> {
     final bytes = await _imageFile!.readAsBytes();
     
     // Run Gemma 4 AI Analysis
-    final result = await aiService.analyzeImage(bytes, widget.asset.createDateTime);
+    final result = await aiService.analyzeImage(bytes, _imageFile!.path, widget.asset.createDateTime);
 
     // Apply real pixel enhancements based on analysis
     final enhancedBytes = await aiService.applyEnhancements(bytes, result);
@@ -152,6 +172,8 @@ class _AiAnalyzeScreenState extends ConsumerState<AiAnalyzeScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (_analysisResult != null) ...[
+            _buildContextualSuggestion(),
+            const SizedBox(height: 24),
             _buildResultHeader(),
             const SizedBox(height: 20),
             if (_analysisResult!.hasDistractions) _buildDistractionAlert(),
@@ -310,27 +332,84 @@ class _AiAnalyzeScreenState extends ConsumerState<AiAnalyzeScreen> {
     );
   }
 
-  Widget _buildAnalyzeButton() {
-    return ElevatedButton(
-      onPressed: _isAnalyzing ? null : _runAiEnhance,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: AppTheme.sonyAccent,
-        foregroundColor: Colors.black,
-        padding: const EdgeInsets.symmetric(vertical: 18),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        elevation: 8,
+  Widget _buildContextualSuggestion() {
+    String suggestionText = "AI detected ${_analysisResult!.environment} scene.";
+    IconData icon = Icons.auto_awesome;
+    
+    if (_analysisResult!.environment.contains("Landscape")) {
+      suggestionText = "Landscape detected. Optimize for clarity and color?";
+      icon = Icons.landscape;
+    } else if (_analysisResult!.environment.contains("Portrait")) {
+      suggestionText = "Portrait detected. Optimize skin tones?";
+      icon = Icons.face;
+    } else if (_analysisResult!.environment.contains("Food")) {
+      suggestionText = "Food detected. Enhance detail and pop?";
+      icon = Icons.restaurant;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [AppTheme.sonyAccent.withValues(alpha: 0.2), Colors.transparent],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.sonyAccent.withValues(alpha: 0.3)),
       ),
-      child: const Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.auto_awesome),
-          SizedBox(width: 12),
-          Text(
-            "ANALYZE WITH GEMMA AI",
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+          Row(
+            children: [
+              Icon(icon, color: AppTheme.sonyAccent, size: 24),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  suggestionText,
+                  style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: _isAnalyzing ? null : _runAiEnhance,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.sonyAccent,
+              foregroundColor: Colors.black,
+              minimumSize: const Size(double.infinity, 48),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (_isAnalyzing)
+                  const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                  )
+                else
+                  const Icon(Icons.auto_fix_high, size: 18),
+                const SizedBox(width: 8),
+                const Text("AI OPTIMIZE", style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1)),
+              ],
+            ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildAnalyzeButton() {
+    return Column(
+      children: [
+        const CircularProgressIndicator(color: AppTheme.sonyAccent, strokeWidth: 2),
+        const SizedBox(height: 16),
+        const Text("AI is scanning image...", style: TextStyle(color: Colors.white54, fontSize: 12)),
+      ],
     );
   }
 }
