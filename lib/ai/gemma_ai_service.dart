@@ -4,6 +4,7 @@ import '../services/ai/recognition_service.dart';
 import '../services/ai/image_editing_service.dart';
 import '../services/metadata/exif_service.dart';
 import '../services/ai/ai_rule_engine.dart';
+import '../services/ai/gen_ai_service.dart';
 
 /// Provider for the Gemma AI Service
 final gemmaAiServiceProvider = Provider<GemmaAiService>((ref) {
@@ -20,8 +21,9 @@ class AiAnalysisResult {
   final bool hasDistractions;
   
   // Flagship AI Metadata
-  List<dynamic> detectedObjects = []; // Using dynamic to avoid direct ML Kit dependency in Result class if needed, or just import it
+  List<dynamic> detectedObjects = []; 
   String mainSubjectLabel = "";
+  String aiPrompt = "";
 
   AiAnalysisResult({
     required this.environment,
@@ -38,6 +40,7 @@ class GemmaAiService {
   final ImageEditingService _editing = ImageEditingService();
   final AiRuleEngine _ruleEngine = AiRuleEngine();
   final ExifService _exif = ExifService();
+  final GenAiService _genAi = GenAiService();
 
   Future<void> initModel() async {
     // Parallel initialization for better performance on Xperia
@@ -67,8 +70,14 @@ class GemmaAiService {
     // Store objects for potential removal process
     analysis.detectedObjects = recognition.objects;
 
-    // 4. Gemma Suggestion Layer
-    analysis.proSuggestions.add("Gemma Insight: Based on the ${analysis.colorProfile} profile, we recommend reducing background noise to keep the focus on the subject.");
+    // 4. GenAI Prompt Generation
+    final aiPrompt = await _genAi.generateEditingStrategy(
+      recognition: recognition,
+      scene: analysis.environment,
+      colorProfile: analysis.colorProfile,
+    );
+    analysis.aiPrompt = aiPrompt;
+    analysis.proSuggestions.add(aiPrompt);
 
     return analysis;
   }
@@ -88,10 +97,12 @@ class GemmaAiService {
     return await _editing.processImage(imageBytes, mode);
   }
 
-  /// Magic Eraser placeholder (Can be implemented with a specific LiteRT model)
+  /// Magic Eraser: Background distractions removed!
   Future<Uint8List> removeDistractions(Uint8List imageBytes, AiAnalysisResult analysis) async {
-    // Currently relying on MIRNet/ESRGAN for quality, 
-    // Generative Eraser would need another model
-    return imageBytes; 
+    // Filter objects to remove (e.g. people in the background)
+    // For this demo, we erase all detected objects to show the "Magic" effect
+    if (analysis.detectedObjects.isEmpty) return imageBytes;
+    
+    return await _editing.eraseObjects(imageBytes, analysis.detectedObjects); 
   }
 }

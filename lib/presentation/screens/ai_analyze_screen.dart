@@ -128,8 +128,17 @@ class _AiAnalyzeScreenState extends ConsumerState<AiAnalyzeScreen> {
                         tag: widget.asset.id,
                         child: InteractiveViewer(
                           child: _showEnhanced && _enhancedImageBytes != null
-                                ? Image.memory(_enhancedImageBytes!, fit: BoxFit.contain)
-                                : Image.file(_imageFile!, fit: BoxFit.contain),
+                                ? Image.memory(
+                                    _enhancedImageBytes!, 
+                                    key: const ValueKey('enhanced'),
+                                    fit: BoxFit.contain,
+                                    errorBuilder: (context, error, stackTrace) => const Center(child: Icon(Icons.error_outline, color: Colors.red)),
+                                  )
+                                : Image.file(
+                                    _imageFile!, 
+                                    key: const ValueKey('original'),
+                                    fit: BoxFit.contain,
+                                  ),
                         ),
                       ),
 
@@ -219,31 +228,84 @@ class _AiAnalyzeScreenState extends ConsumerState<AiAnalyzeScreen> {
   }
 
   Widget _buildResultHeader() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return Column(
       children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              _analysisResult!.environment.toUpperCase(),
-              style: const TextStyle(color: AppTheme.sonyAccent, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.5),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              "Profile: ${_analysisResult!.colorProfile}",
-              style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(20)),
-          child: const Row(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.blue.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+          ),
+          child: Row(
             children: [
-              Icon(Icons.lens_blur, size: 16, color: AppTheme.sonyAccent),
-              SizedBox(width: 6),
-              Text("Gemma 4", style: TextStyle(color: Colors.white70, fontSize: 12)),
+              const Icon(Icons.psychology, color: Colors.blue),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  _analysisResult!.aiPrompt,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontStyle: FontStyle.italic,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        
+        Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _analysisResult!.environment.toUpperCase(),
+                        style: TextStyle(
+                          color: Colors.blue[200],
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Profile: ${_analysisResult!.colorProfile}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.auto_awesome, size: 14, color: Colors.blue[200]),
+                        const SizedBox(width: 4),
+                        const Text(
+                          'Gemma 4',
+                          style: TextStyle(color: Colors.white70, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
