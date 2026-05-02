@@ -28,7 +28,26 @@ class HomeGalleryScreen extends ConsumerWidget {
       body: galleryAsync.when(
         data: (photos) {
           if (photos.isEmpty) {
-            return const Center(child: Text("No photos found."));
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text("No photos found.", style: TextStyle(color: Colors.white70)),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(backgroundColor: AppTheme.sonyAccent),
+                    onPressed: () async {
+                      // Show system dialog to select more photos (Android 14+ Limited mode)
+                      await PhotoManager.presentLimited();
+                      // Refresh the provider
+                      ref.invalidate(galleryProvider);
+                    },
+                    icon: const Icon(Icons.add_photo_alternate, color: Colors.white),
+                    label: const Text("Select Photos", style: TextStyle(color: Colors.white)),
+                  ),
+                ],
+              ),
+            );
           }
           return CustomScrollView(
             physics: const BouncingScrollPhysics(),
