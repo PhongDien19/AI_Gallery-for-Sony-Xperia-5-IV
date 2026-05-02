@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:image/image.dart' as img;
@@ -218,42 +219,73 @@ class ImageEditingService {
       
       // Calculate coordinates (normalized or pixel-based)
       // ML Kit provides pixel coordinates if the image was input as such
-      int left = rect.left.toInt().clamp(0, baked.width);
-      int top = rect.top.toInt().clamp(0, baked.height);
-      int width = rect.width.toInt().clamp(0, baked.width - left);
-      int height = rect.height.toInt().clamp(0, baked.height - top);
+      int startX = rect.left.toInt().clamp(0, baked.width);
+      int startY = rect.top.toInt().clamp(0, baked.height);
+      int objWidth = rect.width.toInt().clamp(0, baked.width - startX);
+      int objHeight = rect.height.toInt().clamp(0, baked.height - startY);
+      int endX = startX + objWidth;
+      int endY = startY + objHeight;
 
-      if (width > 0 && height > 0) {
-        // "Smart Patch" Algorithm: Fill the hole by stretching surrounding pixels
-        // This mimics Content-Aware Fill/Generative Eraser
-        for (int py = top; py < top + height; py++) {
-          for (int px = left; px < left + width; px++) {
-            // Sample from 4 directions
-            final cLeft = baked.getPixel(left - 2, py);
-            final cRight = baked.getPixel(left + width + 1, py);
-            final cTop = baked.getPixel(px, top - 2);
-            final cBottom = baked.getPixel(px, top + height + 1);
+      // 2. Content-Aware Fill Logic (Smart Patch 2.0)
+      // We sample from a wider boundary to avoid smearing the same pixels
+      final int boundaryWidth = (objWidth * 0.4).toInt().clamp(20, 100);
+      final int boundaryHeight = (objHeight * 0.4).toInt().clamp(20, 100);
+      
+      // Sample pixels from the surrounding boundary
+      final List<img.Color> sourcePixels = [];
+      
+      for (int x = startX - boundaryWidth; x < endX + boundaryWidth; x++) {
+        if (x < 0 || x >= baked.width) continue;
+        sourcePixels.add(baked.getPixel(x, (startY - 5).clamp(0, baked.height - 1)).clone());
+        sourcePixels.add(baked.getPixel(x, (endY + 5).clamp(0, baked.height - 1)).clone());
+      }
+      
+      for (int y = startY - boundaryHeight; y < endY + boundaryHeight; y++) {
+        if (y < 0 || y >= baked.height) continue;
+        sourcePixels.add(baked.getPixel((startX - 5).clamp(0, baked.width - 1), y).clone());
+        sourcePixels.add(baked.getPixel((endX + 5).clamp(0, baked.width - 1), y).clone());
+      }
+      
+      if (sourcePixels.isEmpty) continue;
 
-            // Calculate weights based on distance to edges
-            double wL = 1.0 / (px - left + 1);
-            double wR = 1.0 / (left + width - px + 1);
-            double wT = 1.0 / (py - top + 1);
-            double wB = 1.0 / (top + height - py + 1);
-            double totalW = wL + wR + wT + wB;
-
-            int r = ((cLeft.r * wL + cRight.r * wR + cTop.r * wT + cBottom.r * wB) / totalW).toInt();
-            int g = ((cLeft.g * wL + cRight.g * wR + cTop.g * wT + cBottom.g * wB) / totalW).toInt();
-            int b = ((cLeft.b * wL + cRight.b * wR + cTop.b * wT + cBottom.b * wB) / totalW).toInt();
-
-            baked.setPixelRgb(px, py, r, g, b);
+      // Fill the object area with a random texture sample from boundary
+      final random = math.Random();
+      for (int y = startY; y < endY; y++) {
+        for (int x = startX; x < endX; x++) {
+          if (x < 0 || x >= baked.width || y < 0 || y >= baked.height) continue;
+          // Random sampling creates natural texture
+          baked.setPixel(x, y, sourcePixels[random.nextInt(sourcePixels.length)]);
+        }
+      }
+      
+      // Edge blending blur
+      for (int y = startY - 2; y < endY + 2; y++) {
+        for (int x = startX - 2; x < endX + 2; x++) {
+          if (x <= 1 || x >= baked.width - 2 || y <= 1 || y >= baked.height - 2) continue;
+          if (x < startX + 3 || x > endX - 3 || y < startY + 3 || y > endY - 3) {
+             baked.setPixel(x, y, _getAveragePixel(baked, x, y));
           }
         }
-        // Apply a light blur to the patch edges to blend in
-        img.gaussianBlur(baked, radius: 2);
       }
+      img.gaussianBlur(baked, radius: 2);
     }
 
     return Uint8List.fromList(img.encodeJpg(baked, quality: 90));
+  }
+
+  static img.Color _getAveragePixel(img.Image image, int x, int y) {
+    double r = 0, g = 0, b = 0;
+    int count = 0;
+    for (int i = -1; i <= 1; i++) {
+      for (int j = -1; j <= 1; j++) {
+        final p = image.getPixel(x + i, y + j);
+        r += p.r;
+        g += p.g;
+        b += p.b;
+        count++;
+      }
+    }
+    return img.ColorRgb8((r / count).toInt(), (g / count).toInt(), (b / count).toInt());
   }
 
   void dispose() {

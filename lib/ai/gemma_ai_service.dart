@@ -99,10 +99,45 @@ class GemmaAiService {
 
   /// Magic Eraser: Background distractions removed!
   Future<Uint8List> removeDistractions(Uint8List imageBytes, AiAnalysisResult analysis) async {
-    // Filter objects to remove (e.g. people in the background)
-    // For this demo, we erase all detected objects to show the "Magic" effect
     if (analysis.detectedObjects.isEmpty) return imageBytes;
-    
     return await _editing.eraseObjects(imageBytes, analysis.detectedObjects); 
+  }
+
+  /// AI Command Edit: Follow user instructions
+  Future<Uint8List> customEdit(Uint8List imageBytes, AiAnalysisResult analysis, String userInstruction) async {
+    final plan = await _genAi.analyzeImageMultimodal(
+      imageBytes: imageBytes,
+      userInstruction: userInstruction,
+    );
+
+    // Update the prompt so the user sees Gemini's understanding
+    analysis.aiPrompt = "User Command Executed: $userInstruction. Applied style: ${plan['style']} with modified exposure and contrast.";
+
+    // If the plan suggests removing distractions, do that first
+    Uint8List workingBytes = imageBytes;
+    if (plan['remove_distractions'] == true && analysis.detectedObjects.isNotEmpty) {
+      workingBytes = await _editing.eraseObjects(workingBytes, analysis.detectedObjects);
+    }
+
+    // Since we don't have a direct 'apply JSON values' in ImageEditingService yet,
+    // we'll map the 'style' to our predefined modes or use a fallback logic.
+    final style = plan['style']?.toString().toLowerCase() ?? "natural";
+    final isWarm = userInstruction.toLowerCase().contains('warm') || userInstruction.toLowerCase().contains('ấm');
+    final isPortrait = userInstruction.toLowerCase().contains('portrait') || userInstruction.toLowerCase().contains('chân dung');
+    final isCinematic = userInstruction.toLowerCase().contains('cinematic') || userInstruction.toLowerCase().contains('phim');
+
+    if (style == "natural" && !isWarm && !isPortrait && !isCinematic) {
+      // User likely just wanted to erase or didn't specify a style.
+      return workingBytes;
+    }
+
+    EditingMode mode = EditingMode.cinematic;
+    if (style.contains('sunrise') || isWarm) {
+      mode = EditingMode.sunrise;
+    } else if (style.contains('natural') || isPortrait) {
+      mode = EditingMode.sCinetone;
+    }
+
+    return await _editing.processImage(workingBytes, mode);
   }
 }

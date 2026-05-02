@@ -1,5 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:photo_manager/photo_manager.dart';
@@ -23,6 +25,13 @@ class _AiAnalyzeScreenState extends ConsumerState<AiAnalyzeScreen> {
   AiAnalysisResult? _analysisResult;
   Uint8List? _enhancedImageBytes;
   bool _showEnhanced = false;
+  final TextEditingController _promptController = TextEditingController();
+
+  @override
+  void dispose() {
+    _promptController.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -107,96 +116,184 @@ class _AiAnalyzeScreenState extends ConsumerState<AiAnalyzeScreen> {
     });
   }
 
+  Future<void> _sendGeminiPrompt() async {
+    final instruction = _promptController.text.trim();
+    if (instruction.isEmpty || _imageFile == null || _analysisResult == null) return;
+
+    setState(() => _isAnalyzing = true);
+    FocusScope.of(context).unfocus();
+
+    final aiService = ref.read(gemmaAiServiceProvider);
+    final bytes = await _imageFile!.readAsBytes();
+
+    final editedBytes = await aiService.customEdit(bytes, _analysisResult!, instruction);
+
+    setState(() {
+      _enhancedImageBytes = editedBytes;
+      _isAnalyzing = false;
+      _showEnhanced = true;
+      _promptController.clear();
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Gemini has executed your command!"),
+          backgroundColor: Colors.blue,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.oledBlack,
+      backgroundColor: Colors.black,
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('AI Enhance', style: TextStyle(letterSpacing: 1.0)),
+        title: const Text('AI Enhance', style: TextStyle(letterSpacing: 1.0, fontWeight: FontWeight.bold)),
         backgroundColor: Colors.transparent,
+        elevation: 0,
       ),
       body: _imageFile == null
           ? const Center(child: CircularProgressIndicator(color: AppTheme.sonyAccent))
-          : Column(
+          : Stack(
               children: [
-                Expanded(
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      // Full screen image preview (Hero animated from gallery)
-                      Hero(
-                        tag: widget.asset.id,
-                        child: InteractiveViewer(
-                          child: _showEnhanced && _enhancedImageBytes != null
-                                ? Image.memory(
-                                    _enhancedImageBytes!, 
-                                    key: const ValueKey('enhanced'),
-                                    fit: BoxFit.contain,
-                                    errorBuilder: (context, error, stackTrace) => const Center(child: Icon(Icons.error_outline, color: Colors.red)),
-                                  )
-                                : Image.file(
-                                    _imageFile!, 
-                                    key: const ValueKey('original'),
-                                    fit: BoxFit.contain,
-                                  ),
-                        ),
+                // 1. Full Screen Image Layer
+                Positioned.fill(
+                  bottom: 120, // Leave space for sheet peek
+                  child: Hero(
+                    tag: widget.asset.id,
+                    child: InteractiveViewer(
+                      maxScale: 5.0,
+                      child: Center(
+                        child: _showEnhanced && _enhancedImageBytes != null
+                            ? Image.memory(
+                                _enhancedImageBytes!,
+                                key: const ValueKey('enhanced'),
+                                fit: BoxFit.contain,
+                                errorBuilder: (context, error, stackTrace) =>
+                                    const Center(child: Icon(Icons.error_outline, color: Colors.red)),
+                              )
+                            : Image.file(
+                                _imageFile!,
+                                key: const ValueKey('original'),
+                                fit: BoxFit.contain,
+                              ),
                       ),
-
-                      if (_isAnalyzing || _isErasing)
-                        Container(
-                          color: Colors.black.withValues(alpha: 0.6),
-                          child: Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const CircularProgressIndicator(color: AppTheme.sonyAccent),
-                                const SizedBox(height: 16),
-                                Text(
-                                  _isErasing ? "Generative AI: Removing People..." : "Gemma 4: Analyzing Context...",
-                                  style: const TextStyle(color: Colors.white, fontSize: 16),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                    ],
+                    ),
                   ),
                 ),
-                _buildControlPanel(),
+
+                // 2. Loading Overlay
+                if (_isAnalyzing || _isErasing)
+                  Positioned.fill(
+                    child: Container(
+                      color: Colors.black.withValues(alpha: 0.5),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const CircularProgressIndicator(color: Colors.blue),
+                            const SizedBox(height: 20),
+                            Text(
+                              _isErasing ? "Generative AI: Removing People..." : "Gemma 4: Analyzing Pixels...",
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // 3. Draggable AI Panel
+                DraggableScrollableSheet(
+                  initialChildSize: 0.3,
+                  minChildSize: 0.15,
+                  maxChildSize: 0.85,
+                  builder: (context, scrollController) {
+                    return Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1A1A1A).withValues(alpha: 0.85),
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+                        border: Border.all(color: Colors.white10),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+                        child: BackdropFilter(
+                          filter: ui.ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                          child: ListView(
+                            controller: scrollController,
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            children: [
+                              // Handle bar
+                              Center(
+                                child: Container(
+                                  margin: const EdgeInsets.symmetric(vertical: 16),
+                                  width: 40,
+                                  height: 4,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white24,
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                ),
+                              ),
+
+                              if (_analysisResult != null) ...[
+                                // AI Command Input
+                                Container(
+                                  margin: const EdgeInsets.only(bottom: 20),
+                                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.05),
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(color: Colors.white10),
+                                  ),
+                                  child: TextField(
+                                    controller: _promptController,
+                                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                                    onSubmitted: (_) => _sendGeminiPrompt(),
+                                    decoration: InputDecoration(
+                                      hintText: "Tell Gemini how to edit...",
+                                      hintStyle: const TextStyle(color: Colors.white24),
+                                      border: InputBorder.none,
+                                      suffixIcon: IconButton(
+                                        icon: const Icon(Icons.send, color: Colors.blue),
+                                        onPressed: _sendGeminiPrompt,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                
+                                if (!_showEnhanced) _buildContextualSuggestion(),
+                                const SizedBox(height: 12),
+                                _buildResultHeader(),
+                                const SizedBox(height: 24),
+                                if (_analysisResult!.hasDistractions) _buildDistractionAlert(),
+                                const SizedBox(height: 24),
+                                _buildCompositionMeter(),
+                                const SizedBox(height: 24),
+                                _buildProSuggestions(),
+                                const SizedBox(height: 40),
+                                _buildActionButtons(),
+                                const SizedBox(height: 40),
+                              ] else ...[
+                                const Center(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(40.0),
+                                    child: CircularProgressIndicator(color: Colors.blue),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ],
             ),
-    );
-  }
-
-  Widget _buildControlPanel() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
-      decoration: const BoxDecoration(
-        color: Color(0xFF121212),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
-        boxShadow: [BoxShadow(color: Colors.black54, blurRadius: 20, offset: Offset(0, -5))],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (_analysisResult != null) ...[
-            _buildContextualSuggestion(),
-            const SizedBox(height: 24),
-            _buildResultHeader(),
-            const SizedBox(height: 20),
-            if (_analysisResult!.hasDistractions) _buildDistractionAlert(),
-            const SizedBox(height: 20),
-            _buildCompositionMeter(),
-            const SizedBox(height: 20),
-            _buildProSuggestions(),
-            const SizedBox(height: 24),
-            _buildActionButtons(),
-          ] else ...[
-            _buildAnalyzeButton(),
-          ],
-        ],
-      ),
     );
   }
 
@@ -263,43 +360,47 @@ class _AiAnalyzeScreenState extends ConsumerState<AiAnalyzeScreen> {
             children: [
               Row(
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _analysisResult!.environment.toUpperCase(),
-                        style: TextStyle(
-                          color: Colors.blue[200],
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1.2,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _analysisResult!.environment.toUpperCase(),
+                          style: TextStyle(
+                            color: Colors.blue[200],
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.2,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Profile: ${_analysisResult!.colorProfile}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
+                        const SizedBox(height: 4),
+                        Text(
+                          'Profile: ${_analysisResult!.colorProfile}',
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                  const Spacer(),
+                  const SizedBox(width: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
                       color: Colors.white.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(Icons.auto_awesome, size: 14, color: Colors.blue[200]),
                         const SizedBox(width: 4),
                         const Text(
                           'Gemma 4',
-                          style: TextStyle(color: Colors.white70, fontSize: 12),
+                          style: TextStyle(color: Colors.white70, fontSize: 11),
                         ),
                       ],
                     ),
@@ -465,13 +566,4 @@ class _AiAnalyzeScreenState extends ConsumerState<AiAnalyzeScreen> {
     );
   }
 
-  Widget _buildAnalyzeButton() {
-    return Column(
-      children: [
-        const CircularProgressIndicator(color: AppTheme.sonyAccent, strokeWidth: 2),
-        const SizedBox(height: 16),
-        const Text("AI is scanning image...", style: TextStyle(color: Colors.white54, fontSize: 12)),
-      ],
-    );
-  }
 }
